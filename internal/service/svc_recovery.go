@@ -34,7 +34,7 @@ func (s *Service) TerminateConn(c echo.Context) error {
 	return c.JSON(http.StatusOK, &Response{Data: success})
 }
 
-func (s *Service) ShutdownDatabase(c echo.Context) error {
+func (s *Service) RestartDatabase(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	err := s.monitoredDB.CreateCheckpoint(ctx)
@@ -52,7 +52,7 @@ func (s *Service) ShutdownDatabase(c echo.Context) error {
 
 	var stdErrBuff bytes.Buffer
 	session.Stderr = &stdErrBuff
-	if err := session.Run(`su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl stop -D /var/lib/postgresql/data"`); err != nil {
+	if err := session.Run(`su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl restart -D /var/lib/postgresql/data"`); err != nil {
 		s.logger.Error("Execute command error", zap.Error(err))
 		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
 	}

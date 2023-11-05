@@ -29,7 +29,7 @@ func (h *handler) InitRoutes() *echo.Echo {
 		{
 			rtRecovery.GET("/terminate/:pid", h.svc.TerminateConn)
 			rtRecovery.GET("/vacuum", h.svc.VaccumTable)
-			rtRecovery.GET("/shutdown", h.svc.ShutdownDatabase)
+			rtRecovery.GET("/restart", h.svc.RestartDatabase)
 		}
 	}
 

@@ -17,9 +17,9 @@ import (
 
 const (
 	POSTGRES_CONN_STRING        = "POSTGRES_CONN_STRING"
-	POSTGRES_CONTAINER_HOST     = "POSTGRES_CONTAINER_HOST"
-	POSTGRES_CONTAINER_ROOT     = "POSTGRES_CONTAINER_ROOT"
-	POSTGRES_CONTAINER_ROOT_PWD = "POSTGRES_CONTAINER_ROOT_PWD"
+	SSH_HOST     = "SSH_HOST"
+	SSH_USER     = "SSH_USER"
+	SSH_USER_PWD = "SSH_USER_PWD"
 )
 
 func main() {
@@ -34,14 +34,14 @@ func main() {
 	}
 
 	config := &ssh.ClientConfig{
-		User: os.Getenv(POSTGRES_CONTAINER_ROOT),
+		User: os.Getenv(SSH_USER),
 		Auth: []ssh.AuthMethod{
-			ssh.Password(os.Getenv(POSTGRES_CONTAINER_ROOT_PWD)),
+			ssh.Password(os.Getenv(SSH_USER_PWD)),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	conn, err := ssh.Dial("tcp", os.Getenv(POSTGRES_CONTAINER_HOST)+":22", config)
+	conn, err := ssh.Dial("tcp", os.Getenv(SSH_HOST), config)
 	if err != nil {
 		logger.Fatal("Open ssh error", zap.Error(err))
 	}

@@ -20,9 +20,9 @@ services:
       dockerfile: server.Dockerfile
     environment:
       - POSTGRES_CONN_STRING=postgres://postgres:1234@172.50.0.2:5432/stat-db
-      - POSTGRES_CONTAINER_HOST=172.50.0.2
-      - POSTGRES_CONTAINER_ROOT=root
-      - POSTGRES_CONTAINER_ROOT_PWD=1234
+      - SSH_HOST=172.50.0.2:22
+      - SSH_USER=root
+      - SSH_USER_PWD=1234
     ports:
       - "8008:8008"
     networks:
