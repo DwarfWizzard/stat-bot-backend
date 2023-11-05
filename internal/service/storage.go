@@ -12,10 +12,11 @@ const (
 	AllertManyIdleConn
 	AllertTooLongIdleConn
 	AllertManyRollbacks
+	AllertTooLongQuery
 	AllertUnknown
 )
 
-var AllertDescription []string = []string{"База данных недостижима", "Осталось мало памяти", "Множество соединений в статусе ожидания", "Соединение слишком долго в статусе ожидания", "Множество ошибок", "Внутренняя ошибка", "Неизвестная проблема"}
+var AllertDescription []string = []string{"База данных недостижима", "Осталось мало памяти", "Множество соединений в статусе ожидания", "Соединение слишком долго в статусе ожидания", "Множество ошибок", "Внутренняя ошибка", "Запрос слишком долго в работе", "Неизвестная проблема"}
 
 func (e AllertType) Description() string {
 	return AllertDescription[e]
@@ -36,9 +37,13 @@ func NewAllert(e AllertType, data any) *Allert {
 }
 
 type Conn struct {
-	LastQuery  string    `json:"last_query"`
-	QueryStart time.Time `json:"query_start"`
-	PID        int       `json:"pid"`
+	LastQuery     string    `json:"last_query"`
+	WaitEvent     *string    `json:"wait_event"`
+	WaitEventType *string    `json:"wait_event_type"`
+	TxnStart      *time.Time `json:"txn_start"`
+	QueryStart    time.Time `json:"query_start"`
+	State         *string    `json:"state"`
+	PID           int       `json:"pid"`
 }
 
 type Metrics struct {
@@ -47,14 +52,15 @@ type Metrics struct {
 	Rollbacks  float64 `json:"rollbacks"`
 	Operations int     `json:"operations"`
 
-	ConnsNum  int     `json:"conns_num"`
-	IdleConns float64 `json:"idle_conns"`
-	Conns     []Conn  `json:"conns"`
+	ConnsNum          int     `json:"conns_num"`
+	IdleConns         float64 `json:"idle_conns"`
+	Conns             []Conn  `json:"conns"`
+	LongestActiveConn Conn    `json:"longest_active_conn"`
 
 	MeanResponseTime     float64 `json:"mean_response_time"`
 	MaxOperationDuration int     `json:"max_operation_duration"`
 
-	DiskUsage           uint64  `json:"disk_usage"`
+	DiskUsage           int64   `json:"disk_usage"`
 	DiskUsagePercantage float64 `json:"disk_usage_percantage"`
 
 	Allerts []*Allert `json:"allerts"`

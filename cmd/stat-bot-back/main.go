@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+
 	"os/signal"
 	"syscall"
 
@@ -11,11 +12,14 @@ import (
 	"github.com/DwarfWizzard/stat-bot-backend/internal/service"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 )
 
-// TODO: move to configs
 const (
-	POSTGRES_CONN_STRING = "postgres://postgres:1234@localhost:5432/stat-db"
+	POSTGRES_CONN_STRING        = "POSTGRES_CONN_STRING"
+	POSTGRES_CONTAINER_HOST     = "POSTGRES_CONTAINER_HOST"
+	POSTGRES_CONTAINER_ROOT     = "POSTGRES_CONTAINER_ROOT"
+	POSTGRES_CONTAINER_ROOT_PWD = "POSTGRES_CONTAINER_ROOT_PWD"
 )
 
 func main() {
@@ -24,19 +28,33 @@ func main() {
 
 	logger.Info("Server start")
 
-	pool, err := pgxpool.New(context.Background(), POSTGRES_CONN_STRING)
+	pool, err := pgxpool.New(context.Background(), os.Getenv(POSTGRES_CONN_STRING))
 	if err != nil {
 		logger.Fatal("Open pgx pool error", zap.Error(err))
 	}
 
+	config := &ssh.ClientConfig{
+		User: os.Getenv(POSTGRES_CONTAINER_ROOT),
+		Auth: []ssh.AuthMethod{
+			ssh.Password(os.Getenv(POSTGRES_CONTAINER_ROOT_PWD)),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	conn, err := ssh.Dial("tcp", os.Getenv(POSTGRES_CONTAINER_HOST)+":22", config)
+	if err != nil {
+		logger.Fatal("Open ssh error", zap.Error(err))
+	}
+	defer conn.Close()
+
 	repo := repository.NewRepo(pool)
-	svc := service.NewService(logger, repo)
+	svc := service.NewService(logger, repo, conn)
 	handler := handler.NewHandler(svc)
 
 	go func() {
-		if err := handler.InitRoutes().Start("localhost:8008"); err != nil {
+		if err := handler.InitRoutes().Start(":8008"); err != nil {
 			logger.Warn("Server stopped with error", zap.Error(err))
-		} //TODO: move to configs
+		}
 	}()
 
 	quit := make(chan os.Signal, 1)

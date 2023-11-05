@@ -28,10 +28,9 @@ func (h *handler) InitRoutes() *echo.Echo {
 		rtRecovery := rtApi.Group("/recovery")
 		{
 			rtRecovery.GET("/terminate/:pid", h.svc.TerminateConn)
-			//rtRecovery.Get("/restart/:dbname", h.svc.RestartDatabase)
+			rtRecovery.GET("/vacuum", h.svc.VaccumTable)
+			rtRecovery.GET("/shutdown", h.svc.ShutdownDatabase)
 		}
-
-		//rtApi.GET("/initarmagedon", h.svc.Armagedon) //it will be removed
 	}
 
 	return router

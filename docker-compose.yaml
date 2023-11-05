@@ -1,0 +1,39 @@
+version: "3"
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: stat-bot-postgres
+    environment:
+      POSTGRES_DB: stat-db
+      POSTGRES_PASSWORD: 1234
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      back:
+        ipv4_address: 172.50.0.2
+      default:
+  statserver:
+    build: 
+      context: .
+      dockerfile: server.Dockerfile
+    environment:
+      - POSTGRES_CONN_STRING=postgres://postgres:1234@172.50.0.2:5432/stat-db
+      - POSTGRES_CONTAINER_HOST=172.50.0.2
+      - POSTGRES_CONTAINER_ROOT=root
+      - POSTGRES_CONTAINER_ROOT_PWD=1234
+    ports:
+      - "8008:8008"
+    networks:
+      back:
+        ipv4_address: 172.50.0.3
+      default:
+
+networks:
+  back:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.50.0.0/24

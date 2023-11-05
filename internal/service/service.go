@@ -1,39 +1,42 @@
 package service
 
 import (
-	"errors"
-	"fmt"
+	"bytes"
 	"net/http"
 	"strconv"
-	"syscall"
+	"strings"
 	"time"
 
 	"github.com/DwarfWizzard/stat-bot-backend/internal/repository"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 )
 
 // TODO: add work with many databases
 const (
 	DB_NAME = "stat-db"
 
-	IDLE_CONNS_PERCANTAGE = 80
+	IDLE_CONNS_PERCANTAGE = 70
 	DISK_USAGE_PERCANTAGE = 80
 	LOCK_IDLE_PERCANTAGE  = 80
 	ROLLBACK_PRECANTAGE   = 80
 	CONN_TTL              = 15 * time.Second
+	QUERY_TTL             = 10 * time.Second
 )
 
 type Service struct {
 	logger *zap.Logger
 
 	monitoredDB *repository.Repo
+	sshClient   *ssh.Client
 }
 
-func NewService(logger *zap.Logger, monitoredDB *repository.Repo) *Service {
+func NewService(logger *zap.Logger, monitoredDB *repository.Repo, sshCleint *ssh.Client) *Service {
 	return &Service{
 		logger:      logger,
 		monitoredDB: monitoredDB,
+		sshClient:   sshCleint,
 	}
 }
 
@@ -71,13 +74,7 @@ func (s *Service) CollectMetrics(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
 	}
 
-	totalConns, err := s.monitoredDB.TotalConns(ctx)
-	if err != nil {
-		s.logger.Error("Get total conns error", zap.Error(err))
-		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
-	}
-
-	conns, err := s.monitoredDB.ListConnsByDatabase(ctx, DB_NAME)
+	conns, err := s.monitoredDB.ListConns(ctx)
 	if err != nil {
 		s.logger.Error("Get conns by db error", zap.Error(err))
 		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
@@ -89,13 +86,13 @@ func (s *Service) CollectMetrics(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
 	}
 
-	// totalLockIdleCalls, err := s.monitoredDB.TotalIdleConns(ctx)
-	// if err != nil {
-	// 	s.logger.Error("Get total idle awaiting for unlock calls error", zap.Error(err))
-	// 	return c.JSON(http.StatusInternalServerError, &Response{Error: err})
-	// }
-
 	diskUsage, err := s.monitoredDB.TotalDiskUsageByDB(ctx, DB_NAME)
+	if err != nil {
+		s.logger.Error("Get longest call error", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
+	}
+
+	longestConn, err := s.monitoredDB.LongestQuery(ctx)
 	if err != nil {
 		s.logger.Error("Get longest call error", zap.Error(err))
 		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
@@ -114,10 +111,10 @@ func (s *Service) CollectMetrics(c echo.Context) error {
 
 	metrics.Operations = totalCalls
 
-	metrics.ConnsNum = totalConns
+	metrics.ConnsNum = len(conns)
 
-	if totalConns != 0 {
-		metrics.IdleConns = (float64(totalIdleConns) * 100) / float64(totalConns)
+	if metrics.ConnsNum != 0 {
+		metrics.IdleConns = (float64(totalIdleConns) * 100) / float64(metrics.ConnsNum)
 		if metrics.IdleConns > IDLE_CONNS_PERCANTAGE {
 			Allerts = append(Allerts, NewAllert(AllertManyIdleConn, nil))
 		}
@@ -125,7 +122,11 @@ func (s *Service) CollectMetrics(c echo.Context) error {
 
 	metrics.DiskUsage = diskUsage / 1 >> 20
 
-	allSpace := s.getTotalSpace()
+	allSpace, err := s.getPostgresContainerTotalSpace()
+	if err != nil {
+		s.logger.Error("Get total space error", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
+	}
 	if allSpace != 0 {
 		metrics.DiskUsagePercantage = (float64(diskUsage) * 100) / float64(allSpace)
 		if metrics.DiskUsagePercantage > DISK_USAGE_PERCANTAGE {
@@ -134,9 +135,32 @@ func (s *Service) CollectMetrics(c echo.Context) error {
 	}
 
 	for _, conn := range conns {
-		metrics.Conns = append(metrics.Conns, Conn{LastQuery: conn.LastQuery, QueryStart: conn.QuertStart, PID: conn.PID})
-		if time.Since(conn.QuertStart) > CONN_TTL {
+		metrics.Conns = append(metrics.Conns, Conn{
+			LastQuery:     conn.LastQuery,
+			WaitEvent:     conn.WaitEvent,
+			WaitEventType: conn.WaitEventType,
+			TxnStart:      conn.TxnStart,
+			QueryStart:    conn.QueryStart,
+			State:         conn.State,
+			PID:           conn.PID,
+		})
+		if time.Since(conn.QueryStart) > CONN_TTL {
 			Allerts = append(Allerts, NewAllert(AllertTooLongIdleConn, conn.PID))
+		}
+	}
+
+	if longestConn != nil {
+		metrics.LongestActiveConn = Conn{
+			LastQuery:     longestConn.LastQuery,
+			WaitEvent:     longestConn.WaitEvent,
+			WaitEventType: longestConn.WaitEventType,
+			TxnStart:      longestConn.TxnStart,
+			QueryStart:    longestConn.QueryStart,
+			State:         longestConn.State,
+			PID:           longestConn.PID,
+		}
+		if longestConn.TxnStart != nil && time.Since(*longestConn.TxnStart) > CONN_TTL {
+			Allerts = append(Allerts, NewAllert(AllertTooLongQuery, []any{longestConn.PID, longestConn.LastQuery}))
 		}
 	}
 
@@ -145,34 +169,25 @@ func (s *Service) CollectMetrics(c echo.Context) error {
 	return c.JSON(http.StatusOK, metrics)
 }
 
-func (s *Service) TerminateConn(c echo.Context) error {
-	pidSrt := c.Param("pid")
-
-	ctx := c.Request().Context()
-
-	pid, err := strconv.Atoi(pidSrt)
+func (s *Service) getPostgresContainerTotalSpace() (int64, error) {
+	session, err := s.sshClient.NewSession()
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, &Response{Error: errors.New("invalid input")}) //TODO: add errors handling
+		return 0, err
+	}
+	defer session.Close()
+
+	var buff bytes.Buffer
+	session.Stdout = &buff
+	if err := session.Run("df | awk 'NR==2{print $2}'"); err != nil {
+		return 0, err
 	}
 
-	success, err := s.monitoredDB.TerminateConnByPid(ctx, pid)
+	allSpaceStr := buff.String()
+	allSpaceStr = strings.TrimSpace(allSpaceStr)
+	allSpace, err := strconv.ParseInt(allSpaceStr, 10, 64)
 	if err != nil {
-		s.logger.Error("Terminate connection by PID error", zap.Error(err))
-		return c.JSON(http.StatusInternalServerError, &Response{Error: err})
+		return 0, err
 	}
 
-	if !success {
-		return c.JSON(http.StatusOK, &Response{Data: NewAllert(AllertUnknown, fmt.Sprintf("Соединение %d не закрыто", pid))})
-	}
-
-	return c.JSON(http.StatusOK, &Response{Data: success})
-}
-
-func (s *Service) getTotalSpace() uint64 {
-	fs := syscall.Statfs_t{}
-	err := syscall.Statfs("/bitnami/postgresql", &fs)
-	if err != nil {
-		s.logger.Warn("Get space form container error", zap.Error(err))
-	}
-	return fs.Blocks * uint64(fs.Bsize)
+	return allSpace, nil
 }

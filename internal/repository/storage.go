@@ -5,7 +5,11 @@ import (
 )
 
 type Conn struct {
-	LastQuery  string
-	QuertStart time.Time
-	PID        int
+	LastQuery     string
+	WaitEvent     *string
+	WaitEventType *string
+	TxnStart      *time.Time
+	QueryStart    time.Time
+	State         *string
+	PID           int
 }

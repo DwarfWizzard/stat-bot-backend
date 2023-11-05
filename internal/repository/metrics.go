@@ -43,22 +43,15 @@ func (r *Repo) TotalExecutionTime(ctx context.Context) (float64, error) {
 
 func (r *Repo) TotalCalls(ctx context.Context) (int, error) {
 	var total int
-	err := r.db.QueryRow(ctx, `SELECT SUM(calls) FROM pg_stat_statements`).Scan(&total)
+	err := r.db.QueryRow(ctx, 
+		`SELECT 
+			SUM(calls) 
+		FROM pg_stat_statements`).Scan(&total)
 	if err != nil {
 		return 0, err
 	}
 
 	return total, nil
-}
-
-func (r *Repo) TotalConns(ctx context.Context) (int, error) {
-	var conns int
-	err := r.db.QueryRow(ctx, `SELECT count(datid) FROM pg_stat_activity`).Scan(&conns)
-	if err != nil {
-		return 0, err
-	}
-
-	return conns, nil
 }
 
 func (r *Repo) TotalIdleConns(ctx context.Context) (int, error) {
@@ -81,8 +74,8 @@ func (r *Repo) TotalLockIdleConns(ctx context.Context) (int, error) {
 	return conns, nil
 }
 
-func (r *Repo) TotalDiskUsageByDB(ctx context.Context, dbName string) (uint64, error) {
-	var diskUsage uint64
+func (r *Repo) TotalDiskUsageByDB(ctx context.Context, dbName string) (int64, error) {
+	var diskUsage int64
 	err := r.db.QueryRow(ctx, `select pg_database_size($1)`, dbName).Scan(&diskUsage)
 	if err != nil {
 		return 0, err
@@ -91,10 +84,20 @@ func (r *Repo) TotalDiskUsageByDB(ctx context.Context, dbName string) (uint64, e
 	return diskUsage, nil
 }
 
-func (r *Repo) ListConnsByDatabase(ctx context.Context, dbName string) ([]Conn, error) {
+func (r *Repo) ListConns(ctx context.Context) ([]Conn, error) {
 	var conns []Conn
 
-	rows, err := r.db.Query(ctx, `SELECT query, query_start, pid FROM pg_stat_activity WHERE datname=$1`, dbName)
+	rows, err := r.db.Query(ctx, 
+		`SELECT 
+			query, 
+			wait_event, 
+			wait_event_type, 
+			xact_start, 
+			query_start, 
+			state, 
+			pid 
+		FROM pg_stat_activity 
+		WHERE backend_type='client_backend'`)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,7 @@ func (r *Repo) ListConnsByDatabase(ctx context.Context, dbName string) ([]Conn, 
 
 	for rows.Next() {
 		conn := &Conn{}
-		err := rows.Scan(&conn.LastQuery, &conn.QuertStart, &conn.PID)
+		err := rows.Scan(&conn.LastQuery, &conn.WaitEvent, &conn.WaitEventType, &conn.TxnStart, &conn.QueryStart, &conn.State, &conn.PID)
 		if err != nil {
 			return nil, err
 		}
@@ -115,4 +118,25 @@ func (r *Repo) ListConnsByDatabase(ctx context.Context, dbName string) ([]Conn, 
 	}
 
 	return conns, nil
+}
+
+func (r *Repo) LongestQuery(ctx context.Context) (*Conn, error) {
+	conn := &Conn{}
+	err := r.db.QueryRow(ctx, 
+		`SELECT 
+			query, 
+			wait_event, 
+			wait_event_type, 
+			xact_start, 
+			query_start, 
+			state, 
+			pid 
+		FROM pg_stat_activity 
+		WHERE state = 'active' 
+		ORDER BY xact_start`).Scan(&conn.LastQuery, &conn.WaitEvent, &conn.WaitEventType, &conn.TxnStart, &conn.QueryStart, &conn.State, &conn.PID)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }
